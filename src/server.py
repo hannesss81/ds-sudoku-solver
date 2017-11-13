@@ -1,15 +1,19 @@
-import json
-import socket
+import json, socket, uuid
 from threading import Thread
 from argparse import ArgumentParser
+from common import *
 
-BUFFER_SIZE = 1024
+running_games = []
 
-JOIN_GAME = 'join'
-LIST_GAMES = 'list'
-CREATE_GAME = 'create'
 
-client_sessions = []
+class Game():
+    def __init__(self):
+        self.id = str(uuid.uuid4())
+        self.state = self.generate_new()
+        self.players = []
+
+    def generate_new(self):
+        return "123"
 
 
 class ClientSession(Thread):
@@ -22,9 +26,32 @@ class ClientSession(Thread):
         print "New session started with: " + str(self.address)
         while True:
             msg = self.sock.recv(BUFFER_SIZE)
-            print 'Request: ' + msg
-            break
+            if not msg: break
+
+            msg_json = json.loads(msg)
+            request_str = msg_json['req']
+
+            if request_str == JOIN_GAME:
+                print "want to join"
+            elif request_str == LIST_GAMES:
+                self.handle_list_games()
+            elif request_str == CREATE_GAME:
+                self.handle_new_game()
+            else:
+                print "unknown request"
         print 'Client ' + str(self.address) + ' disconnected.'
+
+    def handle_new_game(self):
+        new_game = Game()
+        running_games.append(new_game)
+        print 'Created new game, ' + str(new_game)
+
+    def handle_list_games(self):
+        games_list = []
+        for game in running_games:
+            games_list.append(game.id)
+        self.sock.send(json.dumps(games_list))
+        print 'Sent games list back to: ' + str(self.sock)
 
 
 def main(args):
@@ -42,7 +69,6 @@ def main(args):
             sock, addr = s.accept()
             client_session = ClientSession(addr, sock)
             client_session.start()
-            client_sessions.append(client_session)
         except (Exception, KeyboardInterrupt) as e:
             print 'Something happened', e
             break

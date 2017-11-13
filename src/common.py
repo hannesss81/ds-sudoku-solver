@@ -1,0 +1,5 @@
+BUFFER_SIZE = 1024
+
+JOIN_GAME = 'join'
+LIST_GAMES = 'list'
+CREATE_GAME = 'create'
