@@ -8,11 +8,16 @@ running_games = {}
 
 
 ##########################################################
+
+game_counter = 0
+
 class Game():
     def __init__(self):
-        self.id = str(uuid.uuid4())
+        global game_counter
+        self.id = "GAME" + str(game_counter)
         self.state = self.generate_new()
         self.players = {}
+        game_counter += 1
 
     def generate_new(self):
         solution = sudoku.generate_grid()
@@ -40,13 +45,21 @@ class Game():
         print '[Game] Added: ' + nickname + ", initial score 0."
 
     def remove_player(self, nickname):
+        player, connection = self.players[nickname]
         del self.players[nickname]
+        if (len(self.players) == 0):
+            del running_games[self.id]
+            return
+        self.notify_everyone()
         print '[Game] Removed: ' + nickname + " from the game."
 
     def notify_everyone(self):
+        scores = []
+        for nickname, (score, _) in self.players.iteritems():
+            scores.append((nickname,score))
         for nickname, (_, connection) in self.players.iteritems():
             print("Sending back to: " + nickname)
-            connection.send(json.dumps({"req": GAME_STATE, "state": self.state[0]}))
+            connection.send(json.dumps({"req": GAME_STATE, "state": self.state[0], "scores":scores}))
 
 
 ##########################################################
@@ -86,8 +99,7 @@ class ClientSession(Thread):
         games_list = []
         for id in running_games:
             games_list.append(id)
-        self.sock.send(json.dumps(games_list))
-        self.done()
+        self.sock.send(json.dumps({"games" : games_list}))
         print '[Connections] Sent games list back to: ' + str(self.sock)
 
     def handle_join_game(self, game_id, nickname):
@@ -95,7 +107,7 @@ class ClientSession(Thread):
         game.add_player(nickname, self.sock)
         self.sock.send(JOIN_OK)
         print '[Game] Joined: ' + nickname + "@" + game_id
-        self.sock.send(json.dumps({"req": GAME_STATE, "state": game.state[0]}))
+        game.notify_everyone()
         while True:
             msg = self.sock.recv(BUFFER_SIZE)
             if not msg: break
@@ -107,10 +119,14 @@ class ClientSession(Thread):
                 x, y, guess = list(msg_json["guess"])
 
                 if self.check_match(x, y, guess, game):
+                    game.players[nickname] = (game.players[nickname][0]+1, game.players[nickname][1])
                     index = 9 * int(x) + int(y)
                     modified_game_state = (game.state[0][:index] + guess + game.state[0][index + 1:], game.state[1])
                     game.state = modified_game_state
-                    game.notify_everyone()
+                else:
+                    game.players[nickname] = (game.players[nickname][0]-1, game.players[nickname][1])
+                game.notify_everyone()
+
         print '[Game] Left: ' + nickname
         game.remove_player(nickname)
 
