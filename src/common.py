@@ -1,5 +1,7 @@
 BUFFER_SIZE = 1024
 
+## List of common keywords that are used for communicating.
+
 JOIN_GAME = 'join'
 LIST_GAMES = 'list'
 CREATE_GAME = 'create'

@@ -4,13 +4,12 @@ from argparse import ArgumentParser
 
 from common import *
 
+## Keeps track of current running games
 running_games = {}
+game_counter = 0  # Increments after each new session for generating a unique name (GAME0, GAME1, ...)
 
 
-##########################################################
-
-game_counter = 0
-
+## Game Object itself
 class Game():
     def __init__(self):
         global game_counter
@@ -19,6 +18,7 @@ class Game():
         self.players = {}
         game_counter += 1
 
+    ## Generates a new sudoku, uses 3rd party code from - Ripley6811
     def generate_new(self):
         solution = sudoku.generate_grid()
         game = sudoku.generate_game(solution)
@@ -32,18 +32,11 @@ class Game():
                 solution_str += str(elem)
         return state, solution_str
 
-    def increase_score(self, nickname, amount):
-        self.players[nickname] += amount
-        print '[Game] New score of ' + nickname + ": " + str(amount)
-
-    def decrease_score(self, nickname, amount):
-        self.players[nickname] -= amount
-        print '[Game] New score of ' + nickname + ": " + str(amount)
-
     def add_player(self, nickname, connection):
         self.players[nickname] = (0, connection)
         print '[Game] Added: ' + nickname + ", initial score 0."
 
+    ## Removes player from the game and also notifies all other players for GUI update
     def remove_player(self, nickname):
         player, connection = self.players[nickname]
         del self.players[nickname]
@@ -53,17 +46,23 @@ class Game():
         self.notify_everyone()
         print '[Game] Removed: ' + nickname + " from the game."
 
+    ## Notifies every current player of the latest game state (table and scores)
     def notify_everyone(self):
         scores = []
         for nickname, (score, _) in self.players.iteritems():
-            scores.append((nickname,score))
+            scores.append((nickname, score))
         for nickname, (_, connection) in self.players.iteritems():
             print("Sending back to: " + nickname)
-            connection.send(json.dumps({"req": GAME_STATE, "state": self.state[0], "scores":scores}))
+            connection.send(json.dumps({"req": GAME_STATE, "state": self.state[0], "scores": scores}))
+
+    def notify_everyone_winner(self, current_winner):
+        for nickname, (score, connection) in self.players.iteritems():
+            connection.send(json.dumps({"req": WIN, "msg": "Winner was: " + current_winner + "! Game over."}))
 
 
 ##########################################################
 
+## Session thread, for each client a new thread will be created
 class ClientSession(Thread):
     def __init__(self, address, sock):
         Thread.__init__(self)
@@ -99,9 +98,10 @@ class ClientSession(Thread):
         games_list = []
         for id in running_games:
             games_list.append(id)
-        self.sock.send(json.dumps({"games" : games_list}))
+        self.sock.send(json.dumps({"games": games_list}))
         print '[Connections] Sent games list back to: ' + str(self.sock)
 
+    ## Moves to 'game' mode and starts receiving events of new guesses and will notify all players afterwards.
     def handle_join_game(self, game_id, nickname):
         game = running_games.get(game_id)
         game.add_player(nickname, self.sock)
@@ -117,19 +117,29 @@ class ClientSession(Thread):
 
             if request_str == NEW_GUESS:
                 x, y, guess = list(msg_json["guess"])
-
                 if self.check_match(x, y, guess, game):
-                    game.players[nickname] = (game.players[nickname][0]+1, game.players[nickname][1])
+                    game.players[nickname] = (game.players[nickname][0] + 1, game.players[nickname][1])
                     index = 9 * int(x) + int(y)
                     modified_game_state = (game.state[0][:index] + guess + game.state[0][index + 1:], game.state[1])
                     game.state = modified_game_state
                 else:
-                    game.players[nickname] = (game.players[nickname][0]-1, game.players[nickname][1])
+                    game.players[nickname] = (game.players[nickname][0] - 1, game.players[nickname][1])
+                if game.state[0] == game.state[1]:
+                    current_winner = ""
+                    current_max = -999999
+                    for name, (score, connection) in game.players.iteritems():
+                        if current_max < score:
+                            current_winner = name
+                            current_max = score
+                    print("Winner: " + str(name) + ", score: " + str(score))
+                    game.notify_everyone_winner(current_winner)
+                    break
                 game.notify_everyone()
 
         print '[Game] Left: ' + nickname
         game.remove_player(nickname)
 
+    ## Checks whether the guess was correct
     def check_match(self, x, y, guess, game):
         correct = game.state[1]
         print(correct)
@@ -156,7 +166,7 @@ def main(args):
         s.listen(1)
         try:
             sock, addr = s.accept()
-            client_session = ClientSession(addr, sock)
+            client_session = ClientSession(addr, sock)  ## New thread for each client.
             client_session.start()
         except (Exception, KeyboardInterrupt) as e:
             print '[Connections] Something happened', e
